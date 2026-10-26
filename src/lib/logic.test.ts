@@ -26,6 +26,8 @@ const photo = (over: Partial<Photo> = {}): Photo => ({
   suggestedTags: [],
   indexed: 1,
   version: 1,
+  updatedAt: 0,
+  dirty: 0,
   ...over,
 });
 
@@ -60,7 +62,7 @@ describe('rankPhotos', () => {
   });
   it('matches album names, ignoring accents', () => {
     const inAlbum = photo({ albumIds: ['a1'] });
-    const r = rankPhotos({ photos: [inAlbum, plain], albums: [{ id: 'a1', name: 'Férias', createdAt: 0 }], query: parseQuery('ferias'), embeddings: new Map() });
+    const r = rankPhotos({ photos: [inAlbum, plain], albums: [{ id: 'a1', name: 'Férias', createdAt: 0, updatedAt: 0, dirty: 0 }], query: parseQuery('ferias'), embeddings: new Map() });
     expect(r).toEqual([inAlbum]);
   });
   it('orders by similarity when a vector is given', () => {

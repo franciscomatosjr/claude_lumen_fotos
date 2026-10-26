@@ -67,7 +67,7 @@ export function Editor({ photo, onClose }: { photo: Photo; onClose: () => void }
   // Downscale the original once; every preview renders from this copy.
   useEffect(() => {
     let alive = true;
-    loadOriginal(photo.id).then(bitmap => {
+    loadOriginal(photo).then(bitmap => {
       if (!alive) return;
       const k = Math.min(1, PREVIEW_MAX / Math.max(bitmap.width, bitmap.height));
       const c = makeCanvas(Math.round(bitmap.width * k), Math.round(bitmap.height * k));
@@ -82,6 +82,7 @@ export function Editor({ photo, onClose }: { photo: Photo; onClose: () => void }
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo.id]);
 
   const commit = useCallback(

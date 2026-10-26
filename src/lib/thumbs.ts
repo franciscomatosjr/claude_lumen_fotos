@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { db, type Photo } from './db';
 import { isIdentity, renderEdited, withDefaults } from './edits';
+import { getOriginalBlob, remoteThumbUrl } from './files';
 import { canvasToBlob } from './import';
 import { loadOriginal } from './render';
 
@@ -9,7 +10,9 @@ const MAX = 1500;
 const cache = new Map<string, string>();
 const inflight = new Map<string, Promise<string | undefined>>();
 
-const keyOf = (p: Pick<Photo, 'id' | 'version'>) => `${p.id}:${p.version}`;
+type ThumbRef = Pick<Photo, 'id' | 'version' | 'remoteThumb'>;
+
+const keyOf = (p: ThumbRef) => `${p.id}:${p.version}:${p.remoteThumb ?? 0}`;
 
 function remember(key: string, url: string) {
   cache.set(key, url);
@@ -20,7 +23,8 @@ function remember(key: string, url: string) {
   }
 }
 
-export function thumbUrl(p: Pick<Photo, 'id' | 'version'>): Promise<string | undefined> {
+/** A local thumbnail as an object URL, or the cloud thumbnail's URL for photos synced from elsewhere. */
+export function thumbUrl(p: ThumbRef): Promise<string | undefined> {
   const key = keyOf(p);
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
@@ -28,7 +32,7 @@ export function thumbUrl(p: Pick<Photo, 'id' | 'version'>): Promise<string | und
   if (!job) {
     job = db.files.get(p.id).then(f => {
       inflight.delete(key);
-      if (!f) return undefined;
+      if (!f?.thumb) return remoteThumbUrl(p);
       const url = URL.createObjectURL(f.thumb);
       remember(key, url);
       return url;
@@ -38,7 +42,7 @@ export function thumbUrl(p: Pick<Photo, 'id' | 'version'>): Promise<string | und
   return job;
 }
 
-export function useThumbUrl(p: Pick<Photo, 'id' | 'version'> | undefined) {
+export function useThumbUrl(p: ThumbRef | undefined) {
   const [url, setUrl] = useState(() => (p ? cache.get(keyOf(p)) : undefined));
   useEffect(() => {
     if (!p) return;
@@ -50,7 +54,7 @@ export function useThumbUrl(p: Pick<Photo, 'id' | 'version'> | undefined) {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p?.id, p?.version]);
+  }, [p?.id, p?.version, p?.remoteThumb]);
   return url;
 }
 
@@ -67,9 +71,9 @@ export function useDisplayUrl(p: Photo | undefined) {
     (async () => {
       let blob: Blob | undefined;
       if (isIdentity(p.edits)) {
-        blob = (await db.files.get(p.id))?.original;
+        blob = await getOriginalBlob(p);
       } else {
-        const bitmap = await loadOriginal(p.id);
+        const bitmap = await loadOriginal(p);
         const canvas = renderEdited(bitmap, bitmap.width, bitmap.height, withDefaults(p.edits), 2560);
         bitmap.close();
         blob = await canvasToBlob(canvas, 'image/jpeg', 0.92);
@@ -84,6 +88,6 @@ export function useDisplayUrl(p: Photo | undefined) {
       if (created) URL.revokeObjectURL(created);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p?.id, p?.version]);
+  }, [p?.id, p?.version, p?.remoteOriginal]);
   return url;
 }

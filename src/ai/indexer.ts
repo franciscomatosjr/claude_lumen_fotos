@@ -1,5 +1,6 @@
 import { liveQuery } from 'dexie';
 import { db, type Embedding } from '../lib/db';
+import { getThumbBlob } from '../lib/files';
 import { createStore } from '../lib/store';
 import { embedImage, embedQuery, embedTexts, onModelProgress } from './client';
 import { LABELS, labelStats, suggestTags } from './labels';
@@ -19,6 +20,8 @@ export const embeddingCache = new Map<string, Embedding>();
 
 let labelVectors: Float32Array[] | undefined;
 let running = false;
+/** Photos whose thumbnail wasn't reachable in the last run (synced from elsewhere, not uploaded yet). */
+const unavailable = new Set<string>();
 let translatorWarm: Promise<unknown> | undefined;
 let started = false;
 
@@ -57,16 +60,21 @@ async function run() {
     if (!labelVectors) aiStatus.set({ ...aiStatus.get(), phase: 'downloading', error: undefined });
     labelVectors ??= await embedTexts(LABELS.map(l => `a photo of ${l.prompt}`));
     aiStatus.set({ ...aiStatus.get(), phase: 'indexing', error: undefined });
+    unavailable.clear();
     for (;;) {
-      const batch = await db.photos.where('indexed').equals(0).limit(8).toArray();
+      const batch = await db.photos.where('indexed').equals(0).filter(p => !unavailable.has(p.id)).limit(8).toArray();
       if (!batch.length) break;
       for (const photo of batch) {
-        const file = await db.files.get(photo.id);
-        if (!file) {
+        if (photo.deleted) {
           await db.photos.update(photo.id, { indexed: 1 });
           continue;
         }
-        const vector = await embedImage(file.thumb);
+        const thumb = await getThumbBlob(photo).catch(() => undefined);
+        if (!thumb) {
+          unavailable.add(photo.id);
+          continue;
+        }
+        const vector = await embedImage(thumb);
         const suggestions = suggestTags(vector, labelVectors).filter(t => !photo.tags.includes(t));
         const embedding: Embedding = { id: photo.id, vector, ...labelStats(vector, labelVectors) };
         await db.transaction('rw', db.photos, db.embeddings, async () => {
@@ -76,7 +84,7 @@ async function run() {
         embeddingCache.set(photo.id, embedding);
       }
     }
-    aiStatus.set({ ...aiStatus.get(), phase: 'ready', pending: 0 });
+    aiStatus.set({ ...aiStatus.get(), phase: 'ready', pending: unavailable.size });
     // Fetch the query translator now, so the first search doesn't wait for its download.
     translatorWarm ??= embedQuery('foto', true).catch(() => undefined);
   } catch (err) {
@@ -86,8 +94,18 @@ async function run() {
     running = false;
   }
   // Photos imported between the last empty batch and `running = false` would otherwise wait for the next change.
-  if (aiStatus.get().phase !== 'error' && (await db.photos.where('indexed').equals(0).count())) void run();
+  if (aiStatus.get().phase === 'error') return;
+  const waiting = await db.photos.where('indexed').equals(0).primaryKeys();
+  if (waiting.some(id => !unavailable.has(id))) void run();
 }
+
+/** Keeps the search cache in step with embeddings that arrive from the cloud. */
+export function rememberEmbedding(e: Embedding) {
+  embeddingCache.set(e.id, e);
+}
+
+/** Tries again after sync brings thumbnails or embeddings for photos that couldn't be analysed. */
+export const kickIndexer = () => void run();
 
 /** Re-runs indexing after a failure (e.g. the model download was interrupted). */
 export function retryIndexer() {

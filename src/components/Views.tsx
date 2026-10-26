@@ -7,7 +7,12 @@ import { AlbumCover } from './Dialogs';
 import { Button, Empty, IconButton, Modal, cx } from './ui';
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const formatMB = (bytes: number) => (bytes < 1e6 ? `${Math.max(1, Math.round(bytes / 1e3))} KB` : `${(bytes / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`);
+export const formatMB = (bytes: number) =>
+  bytes < 1e6
+    ? `${Math.max(bytes ? 1 : 0, Math.round(bytes / 1e3))} KB`
+    : bytes < 1e9
+      ? `${(bytes / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} MB`
+      : `${(bytes / 1e9).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} GB`;
 
 export function AlbumsView({ albums, photos, onOpen }: { albums: Album[]; photos: Photo[]; onOpen: (id: string) => void }) {
   const [creating, setCreating] = useState(false);

@@ -95,7 +95,7 @@ async function importOne(file: File, seen: Set<string>): Promise<'added' | 'dupl
   if (seen.has(hash)) return 'duplicates';
   // Claim the hash before awaiting, so a parallel worker holding the same bytes sees it.
   seen.add(hash);
-  if (await db.photos.where('hash').equals(hash).count()) return 'duplicates';
+  if (await db.photos.where('hash').equals(hash).filter(p => !p.deleted).count()) return 'duplicates';
 
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
   const { width, height } = bitmap;
@@ -124,6 +124,8 @@ async function importOne(file: File, seen: Set<string>): Promise<'added' | 'dupl
     suggestedTags: [],
     indexed: 0,
     version: 1,
+    updatedAt: Date.now(),
+    dirty: 1,
   };
   await db.transaction('rw', db.photos, db.files, async () => {
     await db.photos.add(photo);

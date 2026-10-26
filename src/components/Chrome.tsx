@@ -4,6 +4,8 @@ import { aiStatus, retryIndexer } from '../ai/indexer';
 import type { Album } from '../lib/db';
 import type { ImportProgress } from '../lib/import';
 import { useStore } from '../lib/store';
+import { session } from '../sync/api';
+import { AccountCard } from './Account';
 import { Button, IconButton, cx } from './ui';
 
 export type View =
@@ -48,7 +50,8 @@ export function Sidebar({ view, onView, albums, counts }: { view: View; onView: 
       {item({ kind: 'trash' }, <Trash2 size={18} />, 'Lixeira', counts.trash)}
       {albums.length > 0 && <p className="mb-1 mt-5 px-3 text-xs font-medium uppercase tracking-wide text-stone-400">Álbuns</p>}
       {albums.slice(0, 12).map(a => item({ kind: 'album', id: a.id }, <FolderOpen size={16} />, a.name))}
-      <div className="mt-auto pt-4">
+      <div className="mt-auto flex flex-col gap-2 pt-4">
+        <AccountCard />
         <AIStatusCard />
       </div>
     </nav>
@@ -57,6 +60,7 @@ export function Sidebar({ view, onView, albums, counts }: { view: View; onView: 
 
 function AIStatusCard() {
   const s = useStore(aiStatus);
+  const signedIn = useStore(session).state === 'signed-in';
   let body: ReactNode;
   if (s.phase === 'downloading')
     body = (
@@ -103,7 +107,7 @@ function AIStatusCard() {
     <div className="rounded-xl bg-stone-100 p-3 text-xs text-stone-600 dark:bg-white/5 dark:text-stone-300">
       {body}
       <p className="mt-2 flex items-center gap-1.5 text-stone-400">
-        <ShieldCheck size={13} /> Suas fotos ficam neste dispositivo
+        <ShieldCheck size={13} /> {signedIn ? 'A IA analisa tudo neste dispositivo' : 'Suas fotos ficam neste dispositivo'}
       </p>
     </div>
   );

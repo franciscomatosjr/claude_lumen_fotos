@@ -1,0 +1,30 @@
+# Local services for the API: PostgreSQL with pgvector, and SeaweedFS as S3-compatible storage.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: lumen
+      POSTGRES_PASSWORD: lumen
+      POSTGRES_DB: lumen
+    ports:
+      - '5433:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U lumen']
+      interval: 2s
+      retries: 30
+
+  storage:
+    # SeaweedFS with its S3 gateway; credentials come from server/dev/s3.json.
+    image: chrislusf/seaweedfs:4.48
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -volume.max=0
+    ports:
+      - '8333:8333'
+    volumes:
+      - storage-data:/data
+      - ./server/dev/s3.json:/etc/seaweedfs/s3.json:ro
+
+volumes:
+  db-data:
+  storage-data:

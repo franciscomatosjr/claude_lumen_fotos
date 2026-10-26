@@ -3,6 +3,7 @@ import { Heart, Search as SearchIcon, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { embedQuery } from './ai/client';
 import { aiStatus, embeddingCache, startIndexer } from './ai/indexer';
+import { startSync } from './sync/engine';
 import { DropOverlay, ImportToast, SearchBox, SelectionBar, Sidebar, Toast, TopBar, Welcome, type View } from './components/Chrome';
 import { AlbumPicker, ExportDialog, TagDialog } from './components/Dialogs';
 import { Editor } from './components/Editor';
@@ -36,7 +37,7 @@ const byNewest = (a: Photo, b: Photo) => b.takenAt - a.takenAt;
 
 export default function App() {
   const allPhotos = useLiveQuery(() => db.photos.toArray(), []);
-  const albums = useLiveQuery(() => db.albums.orderBy('createdAt').reverse().toArray(), []) ?? [];
+  const albums = useLiveQuery(() => db.albums.orderBy('createdAt').reverse().filter(a => !a.deleted).toArray(), []) ?? [];
   const ai = useStore(aiStatus);
 
   const [view, setView] = useState<View>({ kind: 'library' });
@@ -66,6 +67,7 @@ export default function App() {
 
   useEffect(() => {
     void purgeExpiredTrash().then(startIndexer);
+    void startSync();
   }, []);
 
   useEffect(() => {
@@ -75,7 +77,7 @@ export default function App() {
   }, [toast]);
 
   const live = useMemo(() => (allPhotos ?? []).filter(isLive).sort(byNewest), [allPhotos]);
-  const trashed = useMemo(() => (allPhotos ?? []).filter(p => !isLive(p)).sort((a, b) => b.trashedAt! - a.trashedAt!), [allPhotos]);
+  const trashed = useMemo(() => (allPhotos ?? []).filter(p => !isLive(p) && !p.deleted).sort((a, b) => b.trashedAt! - a.trashedAt!), [allPhotos]);
   const byId = useMemo(() => new Map((allPhotos ?? []).map(p => [p.id, p])), [allPhotos]);
   const allTags = useMemo(() => [...new Set(live.flatMap(p => p.tags))].sort(), [live]);
 

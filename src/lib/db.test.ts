@@ -4,9 +4,11 @@ import {
   acceptAllSuggestions,
   addTags,
   addToAlbum,
+  applyFromServer,
   createAlbum,
   db,
   deleteAlbum,
+  isLive,
   moveToTrash,
   purgeExpiredTrash,
   removeFromAlbum,
@@ -32,12 +34,15 @@ const photo = (id: string, over: Partial<Photo> = {}): Photo => ({
   suggestedTags: [],
   indexed: 0,
   version: 1,
+  updatedAt: 0,
+  dirty: 0,
   ...over,
 });
 
 beforeEach(async () => {
   await Promise.all(db.tables.map(t => t.clear()));
-  await db.photos.bulkAdd([photo('a', { suggestedTags: ['praia', 'mar'] }), photo('b'), photo('c')]);
+  // Seeded as if already synced, so each test starts with nothing pending.
+  await applyFromServer([db.photos], () => db.photos.bulkAdd([photo('a', { suggestedTags: ['praia', 'mar'] }), photo('b'), photo('c')]));
   await db.files.bulkAdd(['a', 'b', 'c'].map(id => ({ id, original: new Blob(), thumb: new Blob() })));
 });
 
@@ -70,7 +75,7 @@ describe('albums', () => {
   it('deleting an album keeps its photos', async () => {
     const id = await createAlbum('X', ['a']);
     await deleteAlbum(id);
-    expect(await db.albums.count()).toBe(0);
+    expect((await db.albums.get(id))!.deleted).toBe(1);
     expect((await db.photos.get('a'))!.albumIds).toEqual([]);
   });
 });
@@ -83,8 +88,22 @@ describe('trash', () => {
     await purgeExpiredTrash(Date.now() + (TRASH_DAYS - 1) * 864e5);
     expect(await db.photos.get('a')).toBeDefined();
     await purgeExpiredTrash(Date.now() + (TRASH_DAYS + 1) * 864e5);
-    expect(await db.photos.get('a')).toBeUndefined();
+    // Kept as a tombstone so the deletion syncs; the files are gone.
+    expect((await db.photos.get('a'))!.deleted).toBe(1);
     expect(await db.files.get('a')).toBeUndefined();
-    expect(await db.photos.count()).toBe(2);
+    expect((await db.photos.toArray()).filter(isLive)).toHaveLength(2);
+  });
+});
+
+describe('change tracking', () => {
+  it('marks user changes pending, but not device-only or server writes', async () => {
+    await addTags(['a'], ['praia']);
+    const a = await db.photos.get('a');
+    expect(a!.dirty).toBe(1);
+    expect(a!.updatedAt).toBeGreaterThan(0);
+    await db.photos.update('b', { indexed: 1 });
+    expect((await db.photos.get('b'))!.dirty).toBe(0);
+    await applyFromServer([db.photos], () => db.photos.update('c', { tags: ['x'] }));
+    expect((await db.photos.get('c'))!.dirty).toBe(0);
   });
 });

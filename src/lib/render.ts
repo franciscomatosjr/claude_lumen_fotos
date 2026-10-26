@@ -1,26 +1,43 @@
 import { zipSync } from 'fflate';
 import { db, type Photo } from './db';
 import { DEFAULT_EDITS, isIdentity, renderEdited, withDefaults, type EditParams } from './edits';
+import { getOriginalBlob } from './files';
 import { THUMB_SIZE, canvasToBlob, makeThumb } from './import';
 
-export async function loadOriginal(id: string) {
-  const file = await db.files.get(id);
-  if (!file) throw new Error('Arquivo da foto não encontrado');
-  return createImageBitmap(file.original, { imageOrientation: 'from-image' });
+type Source = Pick<Photo, 'id' | 'remoteOriginal'>;
+
+export async function loadOriginal(p: Source) {
+  return createImageBitmap(await getOriginalBlob(p), { imageOrientation: 'from-image' });
+}
+
+async function renderThumb(p: Source, edits: EditParams | undefined) {
+  const bitmap = await loadOriginal(p);
+  const thumb = isIdentity(edits)
+    ? await makeThumb(bitmap, THUMB_SIZE)
+    : await canvasToBlob(renderEdited(bitmap, bitmap.width, bitmap.height, withDefaults(edits), THUMB_SIZE), 'image/jpeg', 0.82);
+  bitmap.close();
+  return thumb;
 }
 
 /** Stores the edit parameters and refreshes the thumbnail; the original stays untouched. */
 export async function saveEdits(photo: Photo, edits: EditParams) {
-  const bitmap = await loadOriginal(photo.id);
   const identity = isIdentity(edits);
-  const thumb = identity
-    ? await makeThumb(bitmap, THUMB_SIZE)
-    : await canvasToBlob(renderEdited(bitmap, bitmap.width, bitmap.height, edits, THUMB_SIZE), 'image/jpeg', 0.82);
-  bitmap.close();
+  const thumb = await renderThumb(photo, edits);
   await db.transaction('rw', db.photos, db.files, async () => {
     await db.photos.update(photo.id, { edits: identity ? undefined : edits, version: photo.version + 1 });
-    await db.files.update(photo.id, { thumb });
+    await db.files.put({ ...(await db.files.get(photo.id)), id: photo.id, thumb });
   });
+}
+
+/** Re-renders the local thumbnail after edits made on another device arrive. */
+export async function refreshLocalThumb(photo: Photo) {
+  const file = await db.files.get(photo.id);
+  if (!file?.original) {
+    // Without the original here, fall back to the cloud thumbnail.
+    if (file?.thumb) await db.files.put({ ...file, thumb: undefined });
+    return;
+  }
+  await db.files.put({ ...file, thumb: await renderThumb(photo, photo.edits) });
 }
 
 export type ExportMode = 'original' | 'edited' | 'reduced';
@@ -32,12 +49,11 @@ export const EXPORT_MODES: { id: ExportMode; label: string; hint: string }[] = [
 ];
 
 async function exportOne(photo: Photo, mode: ExportMode): Promise<{ name: string; blob: Blob }> {
-  const file = await db.files.get(photo.id);
-  if (!file) throw new Error('Arquivo da foto não encontrado');
+  const original = await getOriginalBlob(photo);
   if (mode === 'original' || (mode === 'edited' && isIdentity(photo.edits) && !photo.lat)) {
-    return { name: photo.name, blob: file.original };
+    return { name: photo.name, blob: original };
   }
-  const bitmap = await createImageBitmap(file.original, { imageOrientation: 'from-image' });
+  const bitmap = await createImageBitmap(original, { imageOrientation: 'from-image' });
   const canvas = renderEdited(bitmap, bitmap.width, bitmap.height, withDefaults(photo.edits ?? DEFAULT_EDITS), mode === 'reduced' ? 2048 : Infinity);
   bitmap.close();
   const blob = await canvasToBlob(canvas, 'image/jpeg', mode === 'reduced' ? 0.85 : 0.92);

@@ -12,6 +12,24 @@ export interface Storage {
 
 export const fileKey = (userId: string, photoId: string, kind: FileKind) => `u/${userId}/${photoId}/${kind}`;
 
+/** Creates the bucket if missing. Storage may still be starting (as in docker compose), so retry for a while. */
+async function ensureBucket(client: S3Client, Bucket: string, attempts = 30) {
+  for (let i = 1; ; i++) {
+    try {
+      await client.send(new HeadBucketCommand({ Bucket }));
+      return;
+    } catch (err) {
+      const status = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+      if (status === 404) {
+        await client.send(new CreateBucketCommand({ Bucket }));
+        return;
+      }
+      if (i >= attempts) throw err;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+}
+
 export async function createStorage(cfg: Config['s3']): Promise<Storage> {
   const client = new S3Client({
     region: cfg.region,
@@ -20,11 +38,7 @@ export async function createStorage(cfg: Config['s3']): Promise<Storage> {
     forcePathStyle: !!cfg.endpoint,
     credentials: { accessKeyId: cfg.accessKey, secretAccessKey: cfg.secretKey },
   });
-  try {
-    await client.send(new HeadBucketCommand({ Bucket: cfg.bucket }));
-  } catch {
-    await client.send(new CreateBucketCommand({ Bucket: cfg.bucket }));
-  }
+  await ensureBucket(client, cfg.bucket);
   const Bucket = cfg.bucket;
   return {
     async put(key, body, length, type) {

@@ -22,7 +22,18 @@ npm run dev                   # API em http://localhost:8787; o Vite encaminha /
 npm test                      # testes de integração (usam o banco lumen_test e o bucket lumen-photos-test)
 ```
 
-Sem o backend, o app segue funcionando só no aparelho. Requer Node 20+. Na primeira análise de fotos o navegador baixa os modelos de IA (cerca de 150 MB, uma vez só; ficam em cache).
+Sem o backend, o app segue funcionando só no aparelho. Requer Node 20+.
+
+## Produção
+
+`docker-compose.prod.yml` sobe tudo em containers: o Caddy serve o app compilado, faz o HTTPS e encaminha `/api` para a API. Só o Caddy fica exposto; banco, armazenamento e API ficam na rede interna.
+
+```bash
+cp .env.production.example .env.production    # preencha as senhas (openssl rand -hex 24)
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+Com os valores do exemplo, roda em `https://localhost:8443` com certificado próprio do Caddy (o navegador avisa; é esperado) para testar a produção na sua máquina. Num servidor, use o domínio em `SITE_ADDRESS` e `APP_ORIGIN` (ex.: `https://fotos.exemplo.com`), as portas 80 e 443 e aponte o DNS para o servidor; o Caddy obtém o certificado do Let's Encrypt sozinho. Para guardar as fotos no Cloudflare R2 ou no Amazon S3, preencha `S3_ENDPOINT` e as chaves e remova o serviço `storage`. Na primeira análise de fotos o navegador baixa os modelos de IA (cerca de 150 MB, uma vez só; ficam em cache).
 
 ## O que está pronto
 
